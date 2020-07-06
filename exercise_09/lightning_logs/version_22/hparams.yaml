@@ -1,0 +1,4 @@
+batch_size: 64
+lr: 0.0003
+n_hidden: 516
+reg: 0.001
