@@ -12,7 +12,7 @@ import numpy as np
 
 class SegmentationNN(pl.LightningModule):
 
-    def __init__(self, n_class=23, hparams=None):
+    def __init__(self, num_classes=23, hparams=None):
         super().__init__()
         self.hparams = hparams
         #######################################################################
@@ -21,70 +21,43 @@ class SegmentationNN(pl.LightningModule):
         # Input size: [3,240,240]
         # Output size: [23,240,240]
         
-        self.model = nn.Sequential(
-            nn.Conv2d(3,3,kernel_size=3,stride=1,padding=1,groups=3),
-            nn.BatchNorm2d(3),
-            nn.PReLU(),         
-            nn.Conv2d(3,92,kernel_size=1,stride=1),
-            nn.BatchNorm2d(92),
-            nn.PReLU(),
-            
-            nn.Conv2d(92,92,kernel_size=3,stride=1,padding=1,groups=92),
-            nn.BatchNorm2d(92),
-            nn.PReLU(),                            
-            nn.Conv2d(92,184,kernel_size=1,stride=1),
-            nn.BatchNorm2d(184),
-            nn.PReLU(),
-            
-            nn.MaxPool2d(3,stride=2),
-            
-            nn.Conv2d(184,184,kernel_size=3,stride=1,padding=1,groups=184),
-            nn.BatchNorm2d(184),
-            nn.PReLU(),                           
-            nn.Conv2d(184,368,kernel_size=1,stride=1),
-            nn.BatchNorm2d(368),
-            nn.PReLU(),
-                                            
-            nn.Conv2d(368,368,kernel_size=3,stride=1,padding=1,groups=368),
-            nn.BatchNorm2d(368),
-            nn.PReLU(),                            
-            nn.Conv2d(368,736,kernel_size=1,stride=1),
-            nn.BatchNorm2d(736),
-            nn.PReLU(),
-            
-            nn.MaxPool2d(3,stride=2),
-            
-            nn.ConvTranspose2d(736,736,kernel_size=4,stride=2,padding=1,groups=736),
-            nn.BatchNorm2d(736),
-            nn.PReLU(),         
-            nn.ConvTranspose2d(736,368,kernel_size=1,stride=1),
-            nn.BatchNorm2d(368),
-            nn.PReLU(),
-            
-            nn.ConvTranspose2d(368,368,kernel_size=4,stride=2,padding=1,groups=368),
-            nn.BatchNorm2d(368),
-            nn.PReLU(),         
-            nn.ConvTranspose2d(368,184,kernel_size=1,stride=1),
-            nn.BatchNorm2d(184),
-            nn.PReLU(),
-            
-            nn.ConvTranspose2d(184,184,kernel_size=4,stride=2,padding=1,groups=184),
-            nn.BatchNorm2d(184),
-            nn.PReLU(),         
-            nn.ConvTranspose2d(184,92,kernel_size=1,stride=1),
-            nn.BatchNorm2d(92),
-            nn.PReLU(),
-            
-            nn.ConvTranspose2d(92,92,kernel_size=4,stride=2,padding=1,groups=92),
-            nn.BatchNorm2d(92),
-            nn.PReLU(),         
-            nn.ConvTranspose2d(92,23, kernel_size=1,stride=1),
-            nn.BatchNorm2d(23),
-            nn.PReLU(),           
-        )
+        in_channels = 3
+        out_channels = num_classes
+        
+        self.conv1 = self.contract_block(in_channels, 32, 7, 3)
+        self.conv2 = self.contract_block(32, 64, 3, 1)
+        self.conv3 = self.contract_block(64, 128, 3, 1)
 
+        self.upconv3 = self.expand_block(128, 64, 3, 1)
+        self.upconv2 = self.expand_block(64*2, 32, 3, 1)
+        self.upconv1 = self.expand_block(32*2, out_channels, 3, 1)
 
+    def contract_block(self, in_channels, out_channels, kernel_size, padding):
 
+        contract = nn.Sequential(
+            torch.nn.Conv2d(in_channels, out_channels, kernel_size=kernel_size, stride=1, padding=padding),
+            torch.nn.BatchNorm2d(out_channels),
+            torch.nn.ReLU(),
+            torch.nn.Conv2d(out_channels, out_channels, kernel_size=kernel_size, stride=1, padding=padding),
+            torch.nn.BatchNorm2d(out_channels),
+            torch.nn.ReLU(),
+            torch.nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
+                                 )
+
+        return contract
+
+    def expand_block(self, in_channels, out_channels, kernel_size, padding):
+
+        expand = nn.Sequential(torch.nn.Conv2d(in_channels, out_channels, kernel_size, stride=1, padding=padding),
+                            torch.nn.BatchNorm2d(out_channels),
+                            torch.nn.ReLU(),
+                            torch.nn.Conv2d(out_channels, out_channels, kernel_size, stride=1, padding=padding),
+                            torch.nn.BatchNorm2d(out_channels),
+                            torch.nn.ReLU(),
+                            torch.nn.ConvTranspose2d(out_channels, out_channels, kernel_size=3, stride=2, padding=1, output_padding=1) 
+                            )
+        return expand
+    
     def forward(self, x):
         """
         Forward pass of the convolutional neural network. Should not be called
@@ -96,8 +69,16 @@ class SegmentationNN(pl.LightningModule):
         #######################################################################
         #                             YOUR CODE                               #
         #######################################################################
-        x = self.model(x)
-        return x
+        # downsampling part
+        conv1 = self.conv1(x)
+        conv2 = self.conv2(conv1)
+        conv3 = self.conv3(conv2)
+        # upsampling part
+        upconv3 = self.upconv3(conv3)
+        upconv2 = self.upconv2(torch.cat([upconv3, conv2], 1))
+        upconv1 = self.upconv1(torch.cat([upconv2, conv1], 1))
+
+        return upconv1
         #######################################################################
         #                           END OF YOUR CODE                          #
         #######################################################################
